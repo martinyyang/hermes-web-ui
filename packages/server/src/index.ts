@@ -14,6 +14,8 @@ import { bindShutdown } from './services/shutdown'
 import { setupTerminalWebSocket } from './routes/hermes/terminal'
 import { startVersionCheck } from './routes/health'
 import { registerRoutes } from './routes'
+import { setGroupChatServer } from './routes/hermes/group-chat'
+import { GroupChatServer } from './services/hermes/group-chat'
 import { logger } from './services/logger'
 
 // Injected by esbuild at build time; fallback to reading package.json in dev mode
@@ -78,6 +80,10 @@ export async function bootstrap() {
 
   setupTerminalWebSocket(server)
   console.log('[bootstrap] terminal websocket setup')
+
+  // Group chat Socket.IO (must be after server is created)
+  const groupChatServer = new GroupChatServer(server)
+  setGroupChatServer(groupChatServer)
 
   server.on('listening', () => {
     const interfaces = os.networkInterfaces()
