@@ -428,22 +428,6 @@ export async function searchSessionSummaries(
       return items.slice(0, limit)
     }
 
-    if (isNumericQuery(trimmed) || hasUnsafeChars(trimmed)) {
-      const likeRows = runLikeContentSearch(db, source, trimmed)
-      const merged = new Map<string, HermesSessionSearchRow>()
-      for (const row of titleRows) {
-        const mapped = mapSearchRow(row)
-        merged.set(mapped.id, mapped)
-      }
-      for (const row of likeRows) {
-        const mapped = mapSearchRow(row)
-        if (!merged.has(mapped.id)) {
-          merged.set(mapped.id, mapped)
-        }
-      }
-      return [...merged.values()].slice(0, limit)
-    }
-
     throw new Error(`Failed to search sessions: ${message}`)
   } finally {
     db.close()
