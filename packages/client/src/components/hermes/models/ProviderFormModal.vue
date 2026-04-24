@@ -29,6 +29,7 @@ const formData = ref({
   base_url: '',
   api_key: '',
   model: '',
+  context_length: '',
 })
 
 const modelOptions = ref<Array<{ label: string; value: string }>>([])
@@ -75,7 +76,7 @@ watch(() => formData.value.base_url, (url) => {
 
 watch(providerType, () => {
   modelOptions.value = []
-  formData.value = { name: '', base_url: '', api_key: '', model: '' }
+  formData.value = { name: '', base_url: '', api_key: '', model: '', context_length: '' }
   selectedPreset.value = null
 })
 
@@ -154,11 +155,13 @@ async function handleSave() {
       ? selectedPreset.value
       : null
 
+    const contextLength = formData.value.context_length ? parseInt(formData.value.context_length, 10) : undefined
     await modelsStore.addProvider({
       name: formData.value.name.trim(),
       base_url: formData.value.base_url.trim(),
       api_key: formData.value.api_key.trim(),
       model: formData.value.model,
+      context_length: contextLength,
       providerKey,
     })
     message.success(t('models.providerAdded'))
@@ -269,6 +272,14 @@ function handleClose() {
             {{ t('common.fetch') }}
           </NButton>
         </div>
+      </NFormItem>
+
+      <NFormItem v-if="providerType === 'custom'" :label="t('models.contextLength')">
+        <NInput
+          v-model:value="formData.context_length"
+          :placeholder="t('models.contextLengthPlaceholder')"
+          type="number"
+        />
       </NFormItem>
     </NForm>
 
