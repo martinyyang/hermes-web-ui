@@ -278,10 +278,15 @@ export default {
     nousApproved: '登录成功',
     nousDenied: '授权被拒绝，请重试。',
     nousExpired: '授权已过期，请重试。',
+    customBadge: '自定义',
+    customModelPlaceholder: '自定义模型名称',
+    customModelHint: '按回车加载',
     noProviders: '暂无 Provider，添加一个开始吧。',
     builtIn: '内置',
     customType: '自定义',
     provider: 'Provider',
+    contextLength: '上下文长度',
+    contextLengthPlaceholder: '例如 200000（可选）',
     local: '本地 ({host})',
     selectProviderRequired: '请选择 Provider',
     baseUrlRequired: 'Base URL 为必填项',
@@ -624,6 +629,7 @@ export default {
     backendError: '文件操作失败',
     dragDropHint: '拖拽文件到此处上传',
     closeEditor: '关闭编辑器',
+    closePreview: '关闭',
     saveFile: '保存',
   },
   // 下载
@@ -637,6 +643,7 @@ export default {
     unsupportedBackend: '当前 terminal backend 暂不支持文件下载',
     invalidPath: '无效的文件路径',
     download: '下载',
+    downloadFile: '下载文件',
   },
 
   // 更新日志
