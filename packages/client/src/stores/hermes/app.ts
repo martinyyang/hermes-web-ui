@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { checkHealth, fetchAvailableModels, updateDefaultModel, triggerUpdate, type AvailableModelGroup } from '@/api/hermes/system'
+import { checkHealth, fetchConfigModels, updateDefaultModel, triggerUpdate, type AvailableModelGroup } from '@/api/hermes/system'
 
 const WEB_UI_VERSION = __APP_VERSION__
 
@@ -57,10 +57,10 @@ export const useAppStore = defineStore('app', () => {
 
   async function loadModels() {
     try {
-      const res = await fetchAvailableModels()
+      const res = await fetchConfigModels()
       modelGroups.value = res.groups
       selectedModel.value = res.default
-      selectedProvider.value = res.default_provider || ''
+      selectedProvider.value = ''
     } catch {
       // ignore
     }

@@ -66,7 +66,7 @@ function openChangelog() {
     <div class="sidebar-logo" @click="router.push('/hermes/chat')">
       <img :src="logoPath" alt="Hermes" class="logo-img" />
       <span class="logo-text">Hermes</span>
-      <video class="logo-dance" :src="isDark ? danceVideoDark : danceVideoLight" autoplay loop muted playsinline />
+      <!-- <video class="logo-dance" :src="isDark ? danceVideoDark : danceVideoLight" autoplay loop muted playsinline /> -->
     </div>
 
     <nav class="sidebar-nav">
