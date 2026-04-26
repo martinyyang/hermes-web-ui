@@ -529,7 +529,13 @@ export default {
 
   // 변경 이력
   changelog: {
-    new_0_4_7_1: '생각/추론 블록의 실시간 스트리밍 표시',
+    new_0_4_8_1: 'Safe Mermaid diagram rendering with async render and timeout fallback',
+    new_0_4_8_2: 'Fix nested markdown fence rendering truncation',
+    new_0_4_8_3: 'Fix compressed session lineage projection and search',
+    new_0_4_8_4: 'Optimize session list N+1 queries and fix search 500 on non-CJK input',
+    new_0_4_8_5: 'Fix forced scroll to bottom when switching back from other tabs',
+    new_0_4_8_6: 'Smooth session switch with loading transition overlay',
+    new_0_4_8_7: 'Fix login token validation using Hermes session endpoint',    new_0_4_7_1: '생각/추론 블록의 실시간 스트리밍 표시',
     new_0_4_7_2: 'Docker 빌드 중 prepare 스크립트 건너뛰기',
     new_0_4_7_3: '그룹 채팅 모바일 UX 개선 및 UI 다듬기',
     new_0_4_7_4: '컨텍스트 남은 토큰을 음수 대신 0으로 제한',

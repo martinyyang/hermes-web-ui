@@ -529,7 +529,13 @@ export default {
 
   // 更新履歴
   changelog: {
-    new_0_4_7_1: '思考/推論ブロックのリアルタイムストリーミング表示',
+    new_0_4_8_1: 'Safe Mermaid diagram rendering with async render and timeout fallback',
+    new_0_4_8_2: 'Fix nested markdown fence rendering truncation',
+    new_0_4_8_3: 'Fix compressed session lineage projection and search',
+    new_0_4_8_4: 'Optimize session list N+1 queries and fix search 500 on non-CJK input',
+    new_0_4_8_5: 'Fix forced scroll to bottom when switching back from other tabs',
+    new_0_4_8_6: 'Smooth session switch with loading transition overlay',
+    new_0_4_8_7: 'Fix login token validation using Hermes session endpoint',    new_0_4_7_1: '思考/推論ブロックのリアルタイムストリーミング表示',
     new_0_4_7_2: 'Dockerビルド時にprepareスクリプトをスキップ',
     new_0_4_7_3: 'グループチャットのモバイルUX改善とUIのブラッシュアップ',
     new_0_4_7_4: 'コンテキスト残りトークン数をマイナスではなく0に制限',
