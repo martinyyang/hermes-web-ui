@@ -805,7 +805,7 @@ export const useChatStore = defineStore('chat', () => {
           return [f.name, token ? `${base}&token=${encodeURIComponent(token)}` : base]
         }))
         const msgs = getSessionMsgs(sid)
-        const lastUser = msgs.findLast(m => m.id === userMsg.id)
+        const lastUser = [...msgs].reverse().find((m: Message) => m.id === userMsg.id)
         if (lastUser?.attachments) {
           lastUser.attachments = lastUser.attachments.map(a => {
             const dl = urlMap.get(a.name)
