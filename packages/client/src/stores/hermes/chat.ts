@@ -783,13 +783,6 @@ export const useChatStore = defineStore('chat', () => {
               if (lastMsg?.isStreaming) {
                 updateMessage(sid, lastMsg.id, { isStreaming: false })
               }
-              if (evt.usage) {
-                const target = sessions.value.find(s => s.id === sid)
-                if (target) {
-                  target.inputTokens = evt.usage.input_tokens
-                  target.outputTokens = evt.usage.output_tokens
-                }
-              }
               // Server-computed usage (local countTokens, snapshot-aware)
               if ((evt as any).inputTokens != null) {
                 const target = sessions.value.find(s => s.id === sid)
@@ -1100,13 +1093,6 @@ export const useChatStore = defineStore('chat', () => {
           const lastMsg = msgs[msgs.length - 1]
           if (lastMsg?.isStreaming) {
             updateMessage(sid, lastMsg.id, { isStreaming: false })
-          }
-          if (evt.usage) {
-            const target = sessions.value.find(s => s.id === sid)
-            if (target) {
-              target.inputTokens = evt.usage.input_tokens
-              target.outputTokens = evt.usage.output_tokens
-            }
           }
           // Server-computed usage (local countTokens, snapshot-aware)
           if ((evt as any).inputTokens != null) {

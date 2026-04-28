@@ -436,15 +436,6 @@ export class ChatRunSocket {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
 
-      // Save input token count after compression (the actual context sent to model)
-      if (session_id && body.conversation_history) {
-        const state = this.sessionMap.get(session_id)
-        if (state) {
-          state.inputTokens = (body.conversation_history as any[]).reduce(
-            (sum, m) => sum + countTokens(m.content || ''), 0)
-        }
-      }
-
       const res = await fetch(`${upstream}/v1/runs`, {
         method: 'POST',
         headers,
@@ -568,7 +559,7 @@ export class ChatRunSocket {
             }
           }
 
-          // Track usage — recalculate with current snapshot + full messages
+          // Track usage — self-calculate with countTokens + snapshot
           if (parsed.event === 'run.completed') {
             const sid = session_id
             if (sid) {
