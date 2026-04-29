@@ -797,7 +797,7 @@ export class ChatRunSocket {
         this.enqueueEphemeralDelete(hermesSessionId, profile)
       })
       .catch((err: any) => {
-        logger.warn(err, '[chat-run-socket] syncFromHermes failed for session %s', localSessionId)
+        logger.warn(err, '[chat-run-socket] syncFromHermes failed for session %s (hermesId: %s, profile: %s)', localSessionId, hermesSessionId, profile || 'default')
       })
   }
 

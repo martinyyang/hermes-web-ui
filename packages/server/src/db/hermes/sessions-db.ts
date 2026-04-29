@@ -571,8 +571,14 @@ async function openSessionDb() {
     throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
   }
   const { DatabaseSync } = await import('node:sqlite')
-  console.log(`Opening session db: ${sessionDbPath()}`)
-  return new DatabaseSync(sessionDbPath(), { open: true, readOnly: true })
+  const dbPath = sessionDbPath()
+  console.log(`[sessions-db] Opening session db: ${dbPath}`)
+  try {
+    return new DatabaseSync(dbPath, { open: true, readOnly: true })
+  } catch (err: any) {
+    console.error(`[sessions-db] Failed to open session db at ${dbPath}:`, err.message)
+    throw err
+  }
 }
 
 /**
