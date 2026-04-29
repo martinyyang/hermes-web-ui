@@ -134,7 +134,9 @@ export class ChatRunSocket {
                   timestamp: m.timestamp,
                 }
                 if (m.tool_calls?.length) msg.tool_calls = m.tool_calls
-                if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
+                // Always include tool_call_id for role='tool' messages (required by OpenAI API)
+                if (m.role === 'tool') msg.tool_call_id = m.tool_call_id || ''
+                else if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
                 if (m.tool_name) msg.tool_name = m.tool_name
                 if (m.reasoning) msg.reasoning = m.reasoning
                 return msg
@@ -283,7 +285,9 @@ export class ChatRunSocket {
               ).map(m => {
                 const msg: any = { role: m.role, content: m.content || '' }
                 if (m.tool_calls?.length) msg.tool_calls = m.tool_calls
-                if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
+                // Always include tool_call_id for role='tool' messages (required by OpenAI API)
+                if (m.role === 'tool') msg.tool_call_id = m.tool_call_id || ''
+                else if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
                 if (m.tool_name) msg.name = m.tool_name
                 return msg
               })
