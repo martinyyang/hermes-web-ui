@@ -199,7 +199,7 @@ export interface LocalUsageStats {
   by_day: UsageStatsDailyRow[]
 }
 
-export function getLocalUsageStats(): LocalUsageStats {
+export function getLocalUsageStats(profile?: string): LocalUsageStats {
   const empty: LocalUsageStats = {
     input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
     cache_write_tokens: 0, reasoning_tokens: 0, sessions: 0,
@@ -208,6 +208,7 @@ export function getLocalUsageStats(): LocalUsageStats {
   if (!isSqliteAvailable()) return empty
 
   const db = getDb()!
+  const profileFilter = profile ? `WHERE profile = ?` : ''
 
   const totals = db.prepare(`
     SELECT COALESCE(SUM(input_tokens),0) as input_tokens,
@@ -217,7 +218,8 @@ export function getLocalUsageStats(): LocalUsageStats {
       COALESCE(SUM(reasoning_tokens),0) as reasoning_tokens,
       COUNT(DISTINCT session_id) as sessions
     FROM ${TABLE}
-  `).get() as any
+    ${profileFilter}
+  `).get(...(profile ? [profile] : [])) as any
 
   const byModel = db.prepare(`
     SELECT model,
@@ -228,21 +230,30 @@ export function getLocalUsageStats(): LocalUsageStats {
       SUM(reasoning_tokens) as reasoning_tokens,
       COUNT(DISTINCT session_id) as sessions
     FROM ${TABLE}
+    ${profileFilter}
     GROUP BY model
     ORDER BY sessions DESC
-  `).all() as unknown as UsageStatsModelRow[]
+  `).all(...(profile ? [profile] : [])) as unknown as UsageStatsModelRow[]
 
   const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
-  const byDay = db.prepare(`
-    SELECT DATE(created_at / 1000, 'unixepoch') as date,
+  const byDayStmt = profile
+    ? `SELECT DATE(created_at / 1000, 'unixepoch') as date,
       SUM(input_tokens + output_tokens) as tokens,
       SUM(cache_read_tokens) as cache,
       COUNT(DISTINCT session_id) as sessions
-    FROM ${TABLE}
-    WHERE created_at > ?
-    GROUP BY date
-    ORDER BY date
-  `).all(thirtyDaysAgo) as Array<{ date: string; tokens: number; cache: number; sessions: number }>
+      FROM ${TABLE}
+      WHERE profile = ? AND created_at > ?
+      GROUP BY date
+      ORDER BY date`
+    : `SELECT DATE(created_at / 1000, 'unixepoch') as date,
+      SUM(input_tokens + output_tokens) as tokens,
+      SUM(cache_read_tokens) as cache,
+      COUNT(DISTINCT session_id) as sessions
+      FROM ${TABLE}
+      WHERE created_at > ?
+      GROUP BY date
+      ORDER BY date`
+  const byDay = db.prepare(byDayStmt).all(...(profile ? [profile, thirtyDaysAgo] : [thirtyDaysAgo])) as Array<{ date: string; tokens: number; cache: number; sessions: number }>
 
   return {
     input_tokens: totals.input_tokens,

@@ -289,8 +289,11 @@ export async function contextLength(ctx: any) {
 }
 
 export async function usageStats(ctx: any) {
-  // 1. Local session_usage (web UI chat runs)
-  const local = getLocalUsageStats()
+  // Get current active profile
+  const currentProfile = getActiveProfileName()
+
+  // 1. Local session_usage (web UI chat runs) - filtered by current profile
+  const local = getLocalUsageStats(currentProfile)
 
   // 2. Hermes state.db sessions (exclude api_server source)
   let hermesSessions: Array<{
@@ -307,6 +310,9 @@ export async function usageStats(ctx: any) {
 
   try {
     const allSessions = await listSessionSummaries(undefined, 100000)
+    // Only include sessions from current profile
+    // Note: Hermes sessions don't have profile field, so we include all
+    // This could be improved in the future by filtering by some criteria
     hermesSessions = allSessions.filter(s => s.source !== 'api_server')
   } catch (err) {
     logger.warn(err, 'usageStats: failed to load Hermes sessions')
