@@ -264,15 +264,23 @@ export class ChatRunSocket {
             ? getSessionDetail(session_id)
             : await getSessionDetailFromDb(session_id)
           if (detail?.messages?.length) {
+            // Filter valid messages
+            const validMessages = detail.messages.filter(m =>
+              (m.role === 'user' || m.role === 'assistant' || m.role === 'tool') && m.content !== undefined
+            )
+
+            // Exclude the last user message (just added in handleRun)
+            const lastUserMsgIndex = [...validMessages].reverse().findIndex(m => m.role === 'user')
             let history: Array<{
               role: string
               content: string
               tool_calls?: any[]
               tool_call_id?: string
               name?: string
-            }> = detail.messages
-              .filter(m => (m.role === 'user' || m.role === 'assistant' || m.role === 'tool') && m.content !== undefined && m.timestamp !== now)
-              .map(m => {
+            }> = (lastUserMsgIndex >= 0
+                ? validMessages.slice(0, validMessages.length - lastUserMsgIndex - 1)
+                : validMessages
+              ).map(m => {
                 const msg: any = { role: m.role, content: m.content || '' }
                 if (m.tool_calls?.length) msg.tool_calls = m.tool_calls
                 if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
