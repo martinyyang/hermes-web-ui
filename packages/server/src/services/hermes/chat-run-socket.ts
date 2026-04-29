@@ -199,7 +199,7 @@ export class ChatRunSocket {
     profile: string,
   ) {
     const { input, session_id, model, instructions } = data
-    const upstream = (process.env.UPSTREAM || 'http://127.0.0.1:8642').replace(/\/$/, '')
+    const upstream = this.gatewayManager.getUpstream(profile).replace(/\/$/, '')
     const apiKey = this.gatewayManager.getApiKey(profile) || undefined
 
     // Generate ephemeral session ID for Hermes (fresh session per run)
