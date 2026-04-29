@@ -113,7 +113,7 @@ function syncProfileSessions(profile: string): {
 
     try {
       // Check if sessions table has estimated_cost_usd column
-      const tableInfo = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>[]
+      const tableInfo = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
       const hasEstimatedCost = tableInfo.some(col => col.name === 'estimated_cost_usd')
 
       // Build SELECT query - only include estimated_cost_usd if column exists
