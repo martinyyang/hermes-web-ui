@@ -5,6 +5,9 @@ import {
     buildFullSummaryPrompt,
     buildIncrementalUpdatePrompt,
 } from './prompt'
+import { updateUsage } from '../../../db/hermes/usage-store'
+import { getActiveProfileName } from '../../hermes/hermes-profile'
+import { logger } from '../../logger'
 
 /**
  * Calls Hermes /v1/runs to produce LLM-generated summaries.
@@ -67,14 +70,14 @@ export class GatewaySummarizer implements GatewayCaller {
         const { run_id } = await res.json() as { run_id: string }
 
         try {
-            const output = await this.pollForResult(upstream, apiKey, run_id)
+            const output = await this.pollForResult(upstream, apiKey, run_id, sessionId)
             return { summary: output, sessionId }
         } finally {
             // Note: session cleanup is handled by the caller (compressor.ts)
         }
     }
 
-    private pollForResult(upstream: string, apiKey: string | null, runId: string): Promise<string> {
+    private pollForResult(upstream: string, apiKey: string | null, runId: string, sessionId: string): Promise<string> {
         return new Promise<string>((resolve, reject) => {
             const timer = setTimeout(() => {
                 source.close()
@@ -92,6 +95,25 @@ export class GatewaySummarizer implements GatewayCaller {
                     if (parsed.event === 'run.completed') {
                         clearTimeout(timer)
                         source.close()
+
+                        // Record usage data from run.completed event
+                        try {
+                            const profile = getActiveProfileName()
+                            // Extract usage from parsed (may be in different fields)
+                            updateUsage(sessionId, {
+                                inputTokens: parsed.input_tokens || 0,
+                                outputTokens: parsed.output_tokens || 0,
+                                cacheReadTokens: parsed.cache_read_tokens || 0,
+                                cacheWriteTokens: parsed.cache_write_tokens || 0,
+                                reasoningTokens: parsed.reasoning_tokens || 0,
+                                model: parsed.model || '',
+                                profile,
+                            })
+                            logger.debug(`[GatewaySummarizer] Recorded usage for session ${sessionId}: input=${parsed.input_tokens}, output=${parsed.output_tokens}`)
+                        } catch (err: any) {
+                            logger.warn(err, '[GatewaySummarizer] Failed to record usage')
+                        }
+
                         const output = parsed.output
                         if (!output || typeof output !== 'string' || output.trim() === '') {
                             reject(new Error('Empty summarization response'))
