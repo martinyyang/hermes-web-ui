@@ -202,14 +202,17 @@ async function handleDelete() {
 .models-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 4px 6px;
   margin-top: 6px;
-  max-height: 120px;
+  height: 100px;
   overflow-y: auto;
+  align-content: flex-start;
 }
 
 .model-tag {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
   font-size: 10px;
   font-family: $font-code;
   padding: 2px 6px;
