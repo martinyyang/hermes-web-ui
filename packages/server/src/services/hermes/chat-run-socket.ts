@@ -780,6 +780,7 @@ export class ChatRunSocket {
           cacheWriteTokens: detail.cache_write_tokens,
           reasoningTokens: detail.reasoning_tokens,
           model: detail.model,
+          profile: profile || 'default',
         })
 
         // Calculate usage from DB now that data is complete
