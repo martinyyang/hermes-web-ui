@@ -772,6 +772,16 @@ export class ChatRunSocket {
 
         updateSessionStats(localSessionId)
 
+        // Record usage from Hermes session
+        updateUsage(localSessionId, {
+          inputTokens: detail.input_tokens,
+          outputTokens: detail.output_tokens,
+          cacheReadTokens: detail.cache_read_tokens,
+          cacheWriteTokens: detail.cache_write_tokens,
+          reasoningTokens: detail.reasoning_tokens,
+          model: detail.model,
+        })
+
         // Calculate usage from DB now that data is complete
         // Use inputTokens already set by compression path if available
         const state = this.sessionMap.get(localSessionId)
