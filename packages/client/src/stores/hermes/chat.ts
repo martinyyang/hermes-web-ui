@@ -799,17 +799,36 @@ export const useChatStore = defineStore('chat', () => {
               // stream). If we never produced assistant text but the gateway
               // reports a non-empty output, fall back to rendering it as a
               // single assistant message so the user actually sees the reply.
-              const finalOutput =
-                typeof evt.output === 'string' ? evt.output : ''
-              const finalOutputTrimmed = finalOutput.trim()
-              if (!runProducedAssistantText && finalOutputTrimmed !== '') {
-                addMessage(sid, {
-                  id: uid(),
-                  role: 'assistant',
-                  content: finalOutput,
-                  timestamp: Date.now(),
-                })
-                runProducedAssistantText = true
+
+              // Check if backend provided parsed content (from stringified array format)
+              if ((evt as any).parsed_content !== undefined) {
+                // Backend has parsed stringified array format, update last assistant message
+                const msgs = getSessionMsgs(sid)
+                const lastAssistant = [...msgs].reverse().find(m => m.role === 'assistant')
+                if (lastAssistant) {
+                  updateMessage(sid, lastAssistant.id, {
+                    content: (evt as any).parsed_content || '',
+                  })
+                  if ((evt as any).parsed_reasoning) {
+                    updateMessage(sid, lastAssistant.id, {
+                      reasoning: (evt as any).parsed_reasoning,
+                    })
+                  }
+                }
+              } else {
+                // Fallback to output field (legacy behavior)
+                const finalOutput =
+                  typeof evt.output === 'string' ? evt.output : ''
+                const finalOutputTrimmed = finalOutput.trim()
+                if (!runProducedAssistantText && finalOutputTrimmed !== '') {
+                  addMessage(sid, {
+                    id: uid(),
+                    role: 'assistant',
+                    content: finalOutput,
+                    timestamp: Date.now(),
+                  })
+                  runProducedAssistantText = true
+                }
               }
               // Workaround for upstream hermes-agent bug: when the agent
               // layer silently swallows an error (e.g. invalid API key,
@@ -1110,15 +1129,35 @@ export const useChatStore = defineStore('chat', () => {
               target.outputTokens = (evt as any).outputTokens
             }
           }
-          const finalOutput = typeof evt.output === 'string' ? evt.output : ''
-          const finalOutputTrimmed = finalOutput.trim()
-          if (!runProducedAssistantText && finalOutputTrimmed !== '') {
-            addMessage(sid, {
-              id: uid(),
-              role: 'assistant',
-              content: finalOutput,
-              timestamp: Date.now(),
-            })
+          // Check if backend provided parsed content (from stringified array format)
+          let finalOutputTrimmed = ''
+          if ((evt as any).parsed_content !== undefined) {
+            // Backend has parsed stringified array format, update last assistant message
+            const msgs = getSessionMsgs(sid)
+            const lastAssistant = [...msgs].reverse().find(m => m.role === 'assistant')
+            if (lastAssistant) {
+              updateMessage(sid, lastAssistant.id, {
+                content: (evt as any).parsed_content || '',
+              })
+              if ((evt as any).parsed_reasoning) {
+                updateMessage(sid, lastAssistant.id, {
+                  reasoning: (evt as any).parsed_reasoning,
+                })
+              }
+              finalOutputTrimmed = ((evt as any).parsed_content || '').trim()
+            }
+          } else {
+            // Fallback to output field (legacy behavior)
+            const finalOutput = typeof evt.output === 'string' ? evt.output : ''
+            finalOutputTrimmed = finalOutput.trim()
+            if (!runProducedAssistantText && finalOutputTrimmed !== '') {
+              addMessage(sid, {
+                id: uid(),
+                role: 'assistant',
+                content: finalOutput,
+                timestamp: Date.now(),
+              })
+            }
           }
           const swallowedError = !runProducedAssistantText && !runHadToolActivity && finalOutputTrimmed === ''
           if (swallowedError) {

@@ -848,6 +848,8 @@ export class ChatRunSocket {
       // Convert conversation_history from OpenAI format to Anthropic format
       if (body.conversation_history && Array.isArray(body.conversation_history)) {
         body.conversation_history = convertToAnthropicFormat(body.conversation_history)
+        logger.info('[chat-run-socket] converted conversation_history to Anthropic format for session %s: %d messages, content: %s',
+          session_id || '(new)', body.conversation_history.length, JSON.stringify(body.conversation_history, null, 2))
       }
 
       const res = await fetch(`${upstream}/v1/runs`, {
@@ -974,6 +976,9 @@ export class ChatRunSocket {
                   break
                 }
                 case 'run.completed': {
+                  logger.info('[chat-run-socket] ENTER run.completed case, session_id: %s, messages: %d',
+                    session_id, msgs.length)
+
                   if (last?.role === 'assistant' && last.finish_reason == null) {
                     last.finish_reason = parsed.finish_reason || 'stop'
                   }
@@ -994,6 +999,70 @@ export class ChatRunSocket {
                       })
                     }
                   }
+
+                  // Parse stringified array content for all assistant messages
+                  let parsedCount = 0
+                  for (const msg of msgs) {
+                    if (msg.role === 'assistant' && typeof msg.content === 'string' &&
+                      msg.content.trim().startsWith('[') && msg.content.trim().endsWith(']')) {
+                      try {
+                        logger.info('[chat-run-socket] parsing array content for message %s, content preview: %s',
+                          msg.id, msg.content.slice(0, 100))
+                        const parsedContent = JSON.parse(
+                          msg.content
+                            .replace(/'/g, '"')
+                            .replace(/True/g, 'true')
+                            .replace(/False/g, 'false')
+                            .replace(/None/g, 'null')
+                        )
+                        if (Array.isArray(parsedContent)) {
+                          const textBlocks: string[] = []
+                          const toolCalls: any[] = []
+                          let reasoningContent: string | null = null
+
+                          for (const block of parsedContent) {
+                            if (block.type === 'thinking') {
+                              reasoningContent = block.thinking
+                            } else if (block.type === 'text') {
+                              textBlocks.push(block.text)
+                            } else if (block.type === 'tool_use') {
+                              toolCalls.push({
+                                id: block.id,
+                                type: 'function',
+                                function: {
+                                  name: block.name,
+                                  arguments: JSON.stringify(block.input)
+                                }
+                              })
+                            }
+                          }
+
+                          msg.content = textBlocks.join('') || ''
+                          if (toolCalls.length > 0) {
+                            msg.tool_calls = toolCalls
+                          }
+                          if (reasoningContent) {
+                            msg.reasoning = reasoningContent
+                          }
+                          parsedCount++
+                        }
+                      } catch (e) {
+                        logger.error(e, '[chat-run-socket] failed to parse array content for message %s', msg.id)
+                      }
+                    }
+                  }
+
+                  logger.info('[chat-run-socket] EXIT run.completed case, parsed %d messages', parsedCount)
+
+                  // Attach the last assistant message's parsed content to fix stringified array format
+                  const lastAssistantMsg = msgs.filter((m: any) => m.role === 'assistant').pop()
+                  if (lastAssistantMsg && parsedCount > 0) {
+                    parsed.parsed_content = lastAssistantMsg.content || ''
+                    parsed.parsed_tool_calls = lastAssistantMsg.tool_calls || null
+                    parsed.parsed_reasoning = lastAssistantMsg.reasoning || null
+                    logger.info('[chat-run-socket] attached parsed content to run.completed event for message %s', lastAssistantMsg.id)
+                  }
+
                   break
                 }
               }
