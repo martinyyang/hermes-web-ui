@@ -131,7 +131,7 @@ export default {
     arguments: '인수',
     result: '결과',
     truncated: '... (잘림)',
-    thinkingLabel: '사고 과정',
+    executionDuration: 'Execution time',    thinkingLabel: '사고 과정',
     thinkingInProgress: '사고 중…',
     thinkingShow: '사고 과정 펼치기',
     thinkingHide: '사고 과정 접기',

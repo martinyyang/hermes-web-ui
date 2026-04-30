@@ -154,6 +154,7 @@ export default {
     arguments: 'Arguments',
     result: 'Result',
     truncated: '... (truncated)',
+    executionDuration: 'Execution time',
     thinkingLabel: 'Thinking',
     thinkingInProgress: 'Thinking…',
     thinkingShow: 'Show thinking',

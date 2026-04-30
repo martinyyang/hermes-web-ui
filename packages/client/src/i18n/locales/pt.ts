@@ -131,7 +131,7 @@ export default {
     arguments: 'Argumentos',
     result: 'Resultado',
     truncated: '... (truncado)',
-    thinkingLabel: 'Raciocínio',
+    executionDuration: 'Execution time',    thinkingLabel: 'Raciocínio',
     thinkingInProgress: 'Pensando…',
     thinkingShow: 'Mostrar raciocínio',
     thinkingHide: 'Ocultar raciocínio',

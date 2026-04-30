@@ -26,6 +26,7 @@ export interface Message {
   toolArgs?: string
   toolResult?: string
   toolStatus?: 'running' | 'done' | 'error'
+  toolDuration?: number  // 工具执行时长（秒）
   isStreaming?: boolean
   attachments?: Attachment[]
   // 思考/推理文本。两条来源：
@@ -615,8 +616,10 @@ export const useChatStore = defineStore('chat', () => {
 
       // Helper to clean up this session's stream state
       const cleanup = () => {
+        console.log('[sendMessage] cleanup called, deleting stream state for sid:', sid)
         streamStates.value.delete(sid)
         serverWorking.value.delete(sid)
+        console.log('[sendMessage] cleanup done, isStreaming now:', isStreaming.value)
       }
 
       // Per-run flags used to detect silently-swallowed errors at run.completed.
@@ -765,7 +768,13 @@ export const useChatStore = defineStore('chat', () => {
               )
               if (toolMsgs.length > 0) {
                 const last = toolMsgs[toolMsgs.length - 1]
-                updateMessage(sid, last.id, { toolStatus: 'done' })
+                // Check if tool errored
+                const hasError = (evt as any).error === true
+                const duration = (evt as any).duration
+                updateMessage(sid, last.id, {
+                  toolStatus: hasError ? 'error' : 'done',
+                  toolDuration: duration,
+                })
               }
 
               break
@@ -875,6 +884,7 @@ export const useChatStore = defineStore('chat', () => {
         },
         // onDone
         () => {
+          console.log('[sendMessage] onDone callback called, cleaning up stream state')
           const msgs = getSessionMsgs(sid)
           const last = msgs[msgs.length - 1]
           if (last?.isStreaming) {
@@ -1076,7 +1086,11 @@ export const useChatStore = defineStore('chat', () => {
           const msgs = getSessionMsgs(sid)
           const toolMsgs = msgs.filter(m => m.role === 'tool' && m.toolStatus === 'running')
           if (toolMsgs.length > 0) {
-            updateMessage(sid, toolMsgs[toolMsgs.length - 1].id, { toolStatus: 'done' })
+            const hasError = (evt as any).error === true
+            updateMessage(sid, toolMsgs[toolMsgs.length - 1].id, {
+              toolStatus: hasError ? 'error' : 'done',
+              toolDuration: (evt as any).duration,
+            })
           }
 
           break

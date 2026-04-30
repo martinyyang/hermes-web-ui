@@ -367,7 +367,7 @@ export class ChatRunSocket {
 
                 try {
                   const result = await compressor.compress(
-                    history, upstream, apiKey, session_id, contextLength,
+                    history, upstream, apiKey, session_id,
                   )
                   const afterTokens = await this.calcAndUpdateUsage(session_id, cState, emit)
                   this.replaceState(session_id, 'compression.completed', {
@@ -457,7 +457,7 @@ export class ChatRunSocket {
 
                 try {
                   const result = await compressor.compress(
-                    history, upstream, apiKey, session_id, contextLength,
+                    history, upstream, apiKey, session_id,
                   )
                   const cState = this.getOrCreateSession(session_id)
                   const afterTokens = await this.calcAndUpdateUsage(session_id, cState, emit)

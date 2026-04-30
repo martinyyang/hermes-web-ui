@@ -131,7 +131,7 @@ export default {
     arguments: '引数',
     result: '結果',
     truncated: '... (省略)',
-    thinkingLabel: '思考過程',
+    executionDuration: 'Execution time',    thinkingLabel: '思考過程',
     thinkingInProgress: '思考中…',
     thinkingShow: '思考過程を表示',
     thinkingHide: '思考過程を隠す',
