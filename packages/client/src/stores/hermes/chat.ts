@@ -801,6 +801,7 @@ export const useChatStore = defineStore('chat', () => {
               // single assistant message so the user actually sees the reply.
 
               // Check if backend provided parsed content (from stringified array format)
+              let finalOutputTrimmed = ''
               if ((evt as any).parsed_content !== undefined) {
                 // Backend has parsed stringified array format, update last assistant message
                 const msgs = getSessionMsgs(sid)
@@ -814,12 +815,13 @@ export const useChatStore = defineStore('chat', () => {
                       reasoning: (evt as any).parsed_reasoning,
                     })
                   }
+                  finalOutputTrimmed = ((evt as any).parsed_content || '').trim()
                 }
               } else {
                 // Fallback to output field (legacy behavior)
                 const finalOutput =
                   typeof evt.output === 'string' ? evt.output : ''
-                const finalOutputTrimmed = finalOutput.trim()
+                finalOutputTrimmed = finalOutput.trim()
                 if (!runProducedAssistantText && finalOutputTrimmed !== '') {
                   addMessage(sid, {
                     id: uid(),
