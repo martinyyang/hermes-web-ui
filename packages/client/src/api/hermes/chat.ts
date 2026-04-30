@@ -143,13 +143,17 @@ export function startRunViaSocket(
   const expectedSid = body.session_id
   const handleEvent = (event: RunEvent) => {
     if (closed) return
+    // Filter events by session_id to prevent cross-session contamination
     if (expectedSid && event.session_id && event.session_id !== expectedSid) {
       return
     }
-    onEvent(event)
-    if (event.event === 'run.completed' || event.event === 'run.failed') {
-      cleanup()
-      onDone()
+    try {
+      onEvent(event)
+    } finally {
+      if (event.event === 'run.completed' || event.event === 'run.failed') {
+        cleanup()
+        onDone()
+      }
     }
   }
 
