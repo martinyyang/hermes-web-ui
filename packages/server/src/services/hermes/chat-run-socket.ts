@@ -42,8 +42,8 @@ function convertToAnthropicFormat(messages: any[]): any[] {
       const blocks: any[] = []
 
       // Add thinking block if reasoning_content exists
-      if (m.reasoning_content) {
-        blocks.push({ type: 'thinking', thinking: m.reasoning_content })
+      if (m.reasoning) {
+        blocks.push({ type: 'thinking', thinking: m.reasoning })
       }
 
       // Add text content
