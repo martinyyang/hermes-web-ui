@@ -407,15 +407,13 @@ export class ChatRunSocket {
         if (contentToParse.trim().startsWith('[') && contentToParse.trim().endsWith(']')) {
           try {
             // Parse stringified Python-like array to JSON
-            // NOTE: This simple replace can fail on content with embedded quotes
-            let jsonStr = contentToParse
-              .replace(/'/g, '"')  // Python single quotes to JSON double quotes
-              .replace(/True/g, 'true')
-              .replace(/False/g, 'false')
-              .replace(/None/g, 'null')
-
-            logger.info('[chat-run-socket] resume message %s: parsing content, length=%d', m.id, jsonStr.length)
-            const parsedContent = JSON.parse(jsonStr)
+            const parsedContent = JSON.parse(
+              contentToParse
+                .replace(/'/g, '"')
+                .replace(/True/g, 'true')
+                .replace(/False/g, 'false')
+                .replace(/None/g, 'null')
+            )
             if (Array.isArray(parsedContent)) {
               const textBlocks: string[] = []
               const toolCalls: any[] = []
