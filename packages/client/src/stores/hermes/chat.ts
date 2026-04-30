@@ -49,6 +49,7 @@ export interface Session {
   outputTokens?: number
   endedAt?: number | null
   lastActiveAt?: number
+  workspace?: string | null
 }
 
 function uid(): string {
@@ -167,6 +168,7 @@ function mapHermesSession(s: SessionSummary): Session {
     messageCount: s.message_count,
     endedAt: s.ended_at != null ? Math.round(s.ended_at * 1000) : null,
     lastActiveAt: s.last_active != null ? Math.round(s.last_active * 1000) : undefined,
+    workspace: s.workspace || null,
   }
 }
 
