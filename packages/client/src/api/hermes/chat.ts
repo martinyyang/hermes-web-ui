@@ -131,9 +131,21 @@ export function startRunViaSocket(
     socket.off('usage.updated', onUsageUpdated)
   }
 
-  // All event handlers share the same cleanup logic
+  // All event handlers share the same cleanup logic.
+  // IMPORTANT: The Socket.IO connection is shared across all in-flight runs
+  // (single namespace, single socket). When two sessions run concurrently,
+  // every `startRunViaSocket()` call registers its own `message.delta` /
+  // `tool.*` / `run.*` listeners on the SAME socket, so each event would
+  // fan out to every listener and corrupt the wrong session's transcript.
+  // The server tags every payload with `session_id`; we filter here so each
+  // run only sees its own events. We also accept untagged events (for
+  // backwards compatibility) when no session_id was provided in the request.
+  const expectedSid = body.session_id
   const handleEvent = (event: RunEvent) => {
     if (closed) return
+    if (expectedSid && event.session_id && event.session_id !== expectedSid) {
+      return
+    }
     onEvent(event)
     if (event.event === 'run.completed' || event.event === 'run.failed') {
       cleanup()

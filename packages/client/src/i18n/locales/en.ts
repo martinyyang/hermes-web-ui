@@ -149,6 +149,7 @@ export default {
     enterNewTitle: 'Enter new title',
     workspace: 'Workspace',
     setWorkspace: 'Set Workspace',
+    setWorkspaceTitle: 'Set Session Workspace',
     workspacePlaceholder: 'Enter project path, e.g. /home/user/project',
     workspaceSet: 'Workspace set',
     workspaceSetFailed: 'Failed to set workspace',

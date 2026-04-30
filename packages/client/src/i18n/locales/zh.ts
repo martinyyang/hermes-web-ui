@@ -149,6 +149,7 @@ export default {
     enterNewTitle: '输入新标题',
     workspace: '工作区',
     setWorkspace: '设置工作区',
+    setWorkspaceTitle: '设置会话工作区',
     workspacePlaceholder: '输入项目路径，例如 /home/user/project',
     workspaceSet: '工作区已设置',
     workspaceSetFailed: '设置工作区失败',

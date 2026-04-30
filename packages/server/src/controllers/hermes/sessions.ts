@@ -292,8 +292,14 @@ export async function setWorkspace(ctx: any) {
     return
   }
   if (useLocalSessionStore()) {
-    const { updateSession } = await import('../../db/hermes/session-store')
-    updateSession(ctx.params.id, { workspace: workspace || null } as any)
+    const { updateSession, getSession, createSession } = await import('../../db/hermes/session-store')
+    const { getActiveProfileName } = await import('../../services/hermes/hermes-profile')
+    const id = ctx.params.id
+    // Create session if it doesn't exist yet (user may set workspace before sending first message)
+    if (!getSession(id)) {
+      createSession({ id, profile: getActiveProfileName(), title: '' })
+    }
+    updateSession(id, { workspace: workspace || null } as any)
     ctx.body = { ok: true }
     return
   }
