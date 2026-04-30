@@ -10,8 +10,6 @@
  */
 import type { Server, Socket } from 'socket.io'
 import { EventSource } from 'eventsource'
-import { promises as fs } from 'fs'
-import { join } from 'path'
 import { setRunSession } from '../../routes/hermes/proxy-handler'
 import { updateUsage } from '../../db/hermes/usage-store'
 import {
@@ -213,7 +211,7 @@ export class ChatRunSocket {
 
     socket.on('abort', (data: { session_id?: string }) => {
       if (data.session_id) {
-        this.handleAbort(data.session_id)
+        this.handleAbort(socket, data.session_id)
       }
     })
   }
@@ -849,23 +847,7 @@ export class ChatRunSocket {
 
       // Convert conversation_history from OpenAI format to Anthropic format
       if (body.conversation_history && Array.isArray(body.conversation_history)) {
-        const originalHistory = body.conversation_history
         body.conversation_history = convertToAnthropicFormat(body.conversation_history)
-        // Debug: write converted history for comparison
-        try {
-          const debugDir = join(process.cwd(), 'packages', 'server', 'data', 'debug-history')
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-          const filename = `history-${session_id}-${timestamp}-anthropic.json`
-          const filepath = join(debugDir, filename)
-          await fs.writeFile(filepath, JSON.stringify({
-            session_id,
-            original: originalHistory,
-            converted: body.conversation_history
-          }, null, 2), 'utf-8')
-          logger.info('[chat-run-socket] debug history (anthropic) written to %s', filename)
-        } catch (err) {
-          logger.warn(err, '[chat-run-socket] failed to write anthropic debug history')
-        }
       }
 
       const res = await fetch(`${upstream}/v1/runs`, {
@@ -1024,7 +1006,7 @@ export class ChatRunSocket {
 
           if (parsed.event === 'run.completed' || parsed.event === 'run.failed') {
             source.close()
-            if (session_id) this.markCompleted(session_id, { event: parsed.event, run_id: parsed.run_id })
+            if (session_id) this.markCompleted(socket, session_id, { event: parsed.event, run_id: parsed.run_id })
           }
         } catch { /* not JSON, skip */ }
       }
@@ -1032,26 +1014,26 @@ export class ChatRunSocket {
       source.onerror = () => {
         source.close()
         emit('run.failed', { event: 'run.failed', error: 'EventSource connection lost' })
-        if (session_id) this.markCompleted(session_id, { event: 'run.failed' })
+        if (session_id) this.markCompleted(socket, session_id, { event: 'run.failed' })
       }
     } catch (err: any) {
       emit('run.failed', { event: 'run.failed', error: err.message })
-      if (session_id) this.markCompleted(session_id, { event: 'run.failed' })
+      if (session_id) this.markCompleted(socket, session_id, { event: 'run.failed' })
     }
   }
 
   // --- Abort handler ---
 
-  private handleAbort(sessionId: string) {
+  private handleAbort(socket: Socket, sessionId: string) {
     const state = this.sessionMap.get(sessionId)
     if (state?.isWorking && state.abortController) {
       state.abortController.abort()
-      this.markCompleted(sessionId, { event: 'run.failed', run_id: state.runId })
+      this.markCompleted(socket, sessionId, { event: 'run.failed', run_id: state.runId })
     }
   }
 
   /** Mark a session run as completed/failed so reconnecting clients get notified */
-  private markCompleted(sessionId: string, _info: { event: string; run_id?: string }) {
+  private markCompleted(socket: Socket, sessionId: string, _info: { event: string; run_id?: string }) {
     const state = this.sessionMap.get(sessionId)
     if (state) {
       state.isWorking = false
@@ -1065,7 +1047,7 @@ export class ChatRunSocket {
         const prof = state.profile
         state.hermesSessionId = undefined
         state.profile = undefined
-        this.syncFromHermes(sessionId, hermesId, prof)
+        this.syncFromHermes(socket, sessionId, hermesId, prof)
       }
     }
   }
@@ -1117,7 +1099,7 @@ export class ChatRunSocket {
    * and write to local DB. This gives us tool results that SSE events don't include.
    * After sync, enqueues the ephemeral session for deletion.
    */
-  private syncFromHermes(localSessionId: string, hermesSessionId: string, profile?: string) {
+  private syncFromHermes(socket: Socket, localSessionId: string, hermesSessionId: string, profile?: string) {
     getSessionDetailFromDb(hermesSessionId)
       .then((detail) => {
         if (!detail || !detail.messages?.length) {
@@ -1144,7 +1126,6 @@ export class ChatRunSocket {
         if (toInsert.length > 0) {
           // Get in-memory messages to preserve reasoning that was streamed via SSE
           const state = this.sessionMap.get(localSessionId)
-          console.log(toInsert)
           const memoryMessages = state?.messages || []
           logger.info('[chat-run-socket] syncFromHermes: memory has %d messages, DB has %d messages',
             memoryMessages.length, toInsert.length)
@@ -1220,21 +1201,9 @@ export class ChatRunSocket {
         const state = this.sessionMap.get(localSessionId)
         if (state) {
           const emit = (event: string, payload: any) => {
-            this.nsp.to(`session:${localSessionId}`).emit(event, { ...payload, session_id: localSessionId })
+            socket.emit(event, { ...payload, session_id: localSessionId })
           }
           this.calcAndUpdateUsage(localSessionId, state, emit)
-
-          // Send resumed event with complete messages from memory (including reasoning)
-          this.nsp.to(`session:${localSessionId}`).emit('resumed', {
-            session_id: localSessionId,
-            messages: state.messages,
-            isWorking: state.isWorking,
-            events: state.events,
-            inputTokens: state.inputTokens,
-            outputTokens: state.outputTokens,
-          })
-          logger.info('[chat-run-socket] syncFromHermes: sent resumed event to session %s with %d messages',
-            localSessionId, state.messages.length)
         }
 
         // Enqueue ephemeral session for deferred deletion
