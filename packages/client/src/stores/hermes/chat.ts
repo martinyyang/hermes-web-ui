@@ -1267,25 +1267,7 @@ export const useChatStore = defineStore('chat', () => {
     clearInFlight(sid)
   }
 
-  // Tab visibility: re-sync when returning to foreground
-  if (typeof document !== 'undefined') {
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && activeSessionId.value && !isStreaming.value) {
-        const sid = activeSessionId.value
-        if (sid && !streamStates.value.has(sid)) {
-          // Re-load messages via resume (server loads from DB)
-          resumeSession(sid, (data) => {
-            if (data.messages?.length && activeSession.value) {
-              activeSession.value.messages = mapHermesMessages(data.messages as any[])
-            }
-          })
-          resumeInFlightRun(sid)
-        }
-      }
-    })
-  }
-
-  // Transient observation of <think> boundaries during active streaming.
+  // Transient observation of ⁀ thinking boundaries during active streaming.
   // Not persisted; cleared on session switch. See spec §5.3.
   const thinkingObservation = new Map<string, { startedAt?: number; endedAt?: number }>()
 
