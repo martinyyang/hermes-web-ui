@@ -10,6 +10,8 @@
  */
 import type { Server, Socket } from 'socket.io'
 import { EventSource } from 'eventsource'
+import { promises as fs } from 'fs'
+import { join } from 'path'
 import { setRunSession } from '../../routes/hermes/proxy-handler'
 import { updateUsage } from '../../db/hermes/usage-store'
 import {
@@ -28,6 +30,178 @@ import { getCompressionSnapshot } from '../../db/hermes/compression-snapshot'
 import { logger } from '../logger'
 
 const compressor = new ChatContextCompressor()
+
+// --- Helper: Convert Anthropic format to OpenAI format ---
+function convertFromAnthropicFormat(messages: any[]): any[] {
+  const result: any[] = []
+
+  for (const m of messages) {
+    const role = m.role
+    const content = m.content
+
+    if (role === 'assistant') {
+      const msg: any = { role: 'assistant', content: '' }
+
+      // Handle content as array (Anthropic format)
+      if (Array.isArray(content)) {
+        const textBlocks: string[] = []
+        const toolCalls: any[] = []
+        let reasoningContent: string | null = null
+
+        for (const block of content) {
+          if (block.type === 'thinking') {
+            reasoningContent = block.thinking
+          } else if (block.type === 'text') {
+            textBlocks.push(block.text)
+          } else if (block.type === 'tool_use') {
+            toolCalls.push({
+              id: block.id,
+              type: 'function',
+              function: {
+                name: block.name,
+                arguments: JSON.stringify(block.input)
+              }
+            })
+          }
+        }
+
+        msg.content = textBlocks.join('') || '(empty)'
+        if (toolCalls.length > 0) {
+          msg.tool_calls = toolCalls
+        }
+        if (reasoningContent) {
+          msg.reasoning_content = reasoningContent
+        }
+      } else {
+        // Content is already a string
+        msg.content = content || '(empty)'
+      }
+
+      result.push(msg)
+      continue
+    }
+
+    if (role === 'user') {
+      // Handle tool_result in user messages
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'tool_result') {
+            result.push({
+              role: 'tool',
+              content: block.content,
+              tool_call_id: block.tool_use_id
+            })
+          } else if (block.type === 'text') {
+            result.push({
+              role: 'user',
+              content: block.text
+            })
+          }
+        }
+      } else {
+        result.push({ role: 'user', content })
+      }
+      continue
+    }
+
+    // Other roles (tool) - keep as is
+    result.push(m)
+  }
+
+  return result
+}
+
+// --- Helper: Convert OpenAI format to Anthropic format ---
+function convertToAnthropicFormat(messages: any[]): any[] {
+  const result: any[] = []
+
+  for (const m of messages) {
+    const role = m.role
+    const content = m.content || ''
+
+    if (role === 'assistant') {
+      const blocks: any[] = []
+
+      // Add thinking block if reasoning_content exists
+      if (m.reasoning_content) {
+        blocks.push({ type: 'thinking', thinking: m.reasoning_content })
+      }
+
+      // Add text content
+      if (content) {
+        if (typeof content === 'string') {
+          blocks.push({ type: 'text', text: content })
+        } else if (Array.isArray(content)) {
+          blocks.push(...content)
+        }
+      }
+
+      // Add tool_use blocks
+      if (m.tool_calls && Array.isArray(m.tool_calls)) {
+        for (const tc of m.tool_calls) {
+          if (tc.id && tc.function) {
+            let args = tc.function.arguments || '{}'
+            try {
+              args = typeof args === 'string' ? JSON.parse(args) : args
+            } catch {
+              args = {}
+            }
+            blocks.push({
+              type: 'tool_use',
+              id: tc.id,
+              name: tc.function.name,
+              input: args
+            })
+          }
+        }
+      }
+
+      // Handle empty content
+      if (blocks.length === 0) {
+        blocks.push({ type: 'text', text: '(empty)' })
+      }
+
+      result.push({ role: 'assistant', content: blocks })
+      continue
+    }
+
+    if (role === 'tool') {
+      // Convert tool message to tool_result in user message
+      const toolContent = content || '(no output)'
+      const toolResult = {
+        type: 'tool_result',
+        tool_use_id: m.tool_call_id || '',
+        content: typeof toolContent === 'string' ? toolContent : JSON.stringify(toolContent)
+      }
+
+      // Merge with previous user message if it ends with tool_result
+      if (
+        result.length > 0 &&
+        result[result.length - 1].role === 'user' &&
+        Array.isArray(result[result.length - 1].content) &&
+        result[result.length - 1].content.length > 0 &&
+        result[result.length - 1].content[result[result.length - 1].content.length - 1].type === 'tool_result'
+      ) {
+        result[result.length - 1].content.push(toolResult)
+      } else {
+        result.push({ role: 'user', content: [toolResult] })
+      }
+      continue
+    }
+
+    // Regular user message
+    if (role === 'user') {
+      if (typeof content === 'string') {
+        result.push({ role: 'user', content: content || '(empty message)' })
+      } else if (Array.isArray(content)) {
+        result.push({ role: 'user', content })
+      }
+      continue
+    }
+  }
+
+  return result
+}
 
 // --- Session state tracking ---
 
@@ -133,29 +307,117 @@ export class ChatRunSocket {
                   content: m.content || '',
                   timestamp: m.timestamp,
                 }
-                if (m.tool_calls?.length) msg.tool_calls = m.tool_calls
+
+                // Convert Anthropic format content to OpenAI format
+                // Check if content is a stringified array (Hermes Gateway behavior)
+                if (typeof m.content === 'string' && m.content.startsWith('[') && m.content.endsWith(']')) {
+                  try {
+                    // Parse stringified Python-like array to JSON
+                    const parsedContent = JSON.parse(
+                      m.content
+                        .replace(/'/g, '"')  // Python single quotes to JSON double quotes
+                        .replace(/True/g, 'true')
+                        .replace(/False/g, 'false')
+                        .replace(/None/g, 'null')
+                    )
+                    if (Array.isArray(parsedContent)) {
+                      const textBlocks: string[] = []
+                      const toolCalls: any[] = []
+                      let reasoningContent: string | null = null
+
+                      for (const block of parsedContent) {
+                        if (block.type === 'thinking') {
+                          reasoningContent = block.thinking
+                        } else if (block.type === 'text') {
+                          textBlocks.push(block.text)
+                        } else if (block.type === 'tool_use') {
+                          toolCalls.push({
+                            id: block.id,
+                            type: 'function',
+                            function: {
+                              name: block.name,
+                              arguments: JSON.stringify(block.input)
+                            }
+                          })
+                        }
+                      }
+
+                      msg.content = textBlocks.join('') || '(empty)'
+                      if (toolCalls.length > 0) {
+                        msg.tool_calls = toolCalls
+                      }
+                      if (reasoningContent) {
+                        msg.reasoning_content = reasoningContent
+                      }
+                    }
+                  } catch (e) {
+                    // If parsing fails, keep original content
+                    console.log('Failed to parse stringified content:', e)
+                  }
+                } else if (Array.isArray(m.content)) {
+                  const textBlocks: string[] = []
+                  const toolCalls: any[] = []
+                  let reasoningContent: string | null = null
+
+                  for (const block of m.content) {
+                    if (block.type === 'thinking') {
+                      reasoningContent = block.thinking
+                    } else if (block.type === 'text') {
+                      textBlocks.push(block.text)
+                    } else if (block.type === 'tool_use') {
+                      toolCalls.push({
+                        id: block.id,
+                        type: 'function',
+                        function: {
+                          name: block.name,
+                          arguments: JSON.stringify(block.input)
+                        }
+                      })
+                    }
+                  }
+
+                  msg.content = textBlocks.join('') || '(empty)'
+                  if (toolCalls.length > 0) {
+                    msg.tool_calls = toolCalls
+                  }
+                  if (reasoningContent) {
+                    msg.reasoning_content = reasoningContent
+                  }
+                }
+
+                if (m.tool_calls?.length) {
+                  // Filter out tool_calls with empty/invalid id and remove internal fields
+                  const cleanedToolCalls = m.tool_calls
+                    .filter((tc: any) => tc.id && tc.id.length > 0)
+                    .map((tc: any) => ({
+                      id: tc.id,
+                      type: tc.type,
+                      function: tc.function
+                    }))
+                  if (cleanedToolCalls.length > 0) {
+                    msg.tool_calls = cleanedToolCalls
+                  }
+                }
 
                 // For tool messages, ensure tool_call_id exists
                 if (m.role === 'tool') {
-                  if (m.tool_call_id) {
-                    msg.tool_call_id = m.tool_call_id
-                  } else {
+                  let callId = m.tool_call_id
+                  if (!callId || callId.length === 0) {
                     // Try to reconstruct tool_call_id from previous assistant message
                     const prevMsg = arr[idx - 1]
                     if (prevMsg?.role === 'assistant' && prevMsg.tool_calls?.length) {
                       // Find matching tool_call by tool_name
                       const tc = prevMsg.tool_calls.find((t: any) => t.function?.name === m.tool_name)
                       if (tc?.id) {
-                        msg.tool_call_id = tc.id
-                      } else {
-                        // Cannot reconstruct - skip this tool message
-                        return null
+                        callId = tc.id
                       }
-                    } else {
-                      // No previous assistant message with tool_calls - skip
-                      return null
                     }
                   }
+                  // Skip tool message if no valid tool_call_id
+                  if (!callId || callId.length === 0) {
+                    return null
+                  }
+                  msg.tool_call_id = callId
                 }
 
                 if (m.tool_name) msg.tool_name = m.tool_name
@@ -195,9 +457,93 @@ export class ChatRunSocket {
       }
 
       // Reply with messages, working status + events (if working)
+      // Convert messages from internal storage format to OpenAI format for client
+      const clientMessages = state.messages.map((m: any) => {
+        const msg: any = { ...m }
+
+        // Check if content is a stringified array (Hermes Gateway behavior)
+        if (typeof m.content === 'string' && m.content.trim().startsWith('[') && m.content.trim().endsWith(']')) {
+          try {
+            // Parse stringified Python-like array to JSON
+            const parsedContent = JSON.parse(
+              m.content
+                .replace(/'/g, '"')  // Python single quotes to JSON double quotes
+                .replace(/True/g, 'true')
+                .replace(/False/g, 'false')
+                .replace(/None/g, 'null')
+            )
+            if (Array.isArray(parsedContent)) {
+              const textBlocks: string[] = []
+              const toolCalls: any[] = []
+              let reasoningContent: string | null = null
+
+              for (const block of parsedContent) {
+                if (block.type === 'thinking') {
+                  reasoningContent = block.thinking
+                } else if (block.type === 'text') {
+                  textBlocks.push(block.text)
+                } else if (block.type === 'tool_use') {
+                  toolCalls.push({
+                    id: block.id,
+                    type: 'function',
+                    function: {
+                      name: block.name,
+                      arguments: JSON.stringify(block.input)
+                    }
+                  })
+                }
+              }
+
+              msg.content = textBlocks.join('') || '(empty)'
+              if (toolCalls.length > 0) {
+                msg.tool_calls = toolCalls
+              }
+              if (reasoningContent) {
+                msg.reasoning_content = reasoningContent
+              }
+            }
+          } catch (e) {
+            // If parsing fails, keep original content
+            console.log('Failed to parse stringified content:', e)
+          }
+        } else if (Array.isArray(m.content)) {
+          // If content is an array (Anthropic format), convert to OpenAI format
+          const textBlocks: string[] = []
+          const toolCalls: any[] = []
+          let reasoningContent: string | null = null
+
+          for (const block of m.content) {
+            if (block.type === 'thinking') {
+              reasoningContent = block.thinking
+            } else if (block.type === 'text') {
+              textBlocks.push(block.text)
+            } else if (block.type === 'tool_use') {
+              toolCalls.push({
+                id: block.id,
+                type: 'function',
+                function: {
+                  name: block.name,
+                  arguments: JSON.stringify(block.input)
+                }
+              })
+            }
+          }
+
+          msg.content = textBlocks.join('') || '(empty)'
+          if (toolCalls.length > 0) {
+            msg.tool_calls = toolCalls
+          }
+          if (reasoningContent) {
+            msg.reasoning_content = reasoningContent
+          }
+        }
+
+        return msg
+      })
+
       socket.emit('resumed', {
         session_id: sid,
-        messages: state.messages,
+        messages: clientMessages,
         isWorking: state.isWorking,
         events: state.isWorking ? state.events : [],
         inputTokens: state.inputTokens,
@@ -301,31 +647,45 @@ export class ChatRunSocket {
               tool_calls?: any[]
               tool_call_id?: string
               name?: string
+              reasoning_content?: string | null
             }> = (lastUserMsgIndex >= 0
               ? validMessages.slice(0, validMessages.length - lastUserMsgIndex - 1)
               : validMessages
             ).map((m, idx, arr) => {
-              const msg: any = { role: m.role, content: m.content || '' }
-              if (m.tool_calls?.length) msg.tool_calls = m.tool_calls
+              const msg: any = { role: m.role, content: m.content || 'empty message' }
+              if (m.reasoning_content) msg.reasoning_content = m.reasoning_content
+              if (m.tool_calls?.length) {
+                // Filter out tool_calls with empty/invalid id and remove internal fields
+                const cleanedToolCalls = m.tool_calls
+                  .filter((tc: any) => tc.id && tc.id.length > 0)
+                  .map((tc: any) => ({
+                    id: tc.id,
+                    type: tc.type,
+                    function: tc.function
+                  }))
+                if (cleanedToolCalls.length > 0) {
+                  msg.tool_calls = cleanedToolCalls
+                }
+              }
 
               // For tool messages, ensure tool_call_id exists
               if (m.role === 'tool') {
-                if (m.tool_call_id) {
-                  msg.tool_call_id = m.tool_call_id
-                } else {
+                let callId = m.tool_call_id
+                if (!callId || callId.length === 0) {
                   // Try to reconstruct tool_call_id from previous assistant message
                   const prevMsg = arr[idx - 1]
                   if (prevMsg?.role === 'assistant' && prevMsg.tool_calls?.length) {
                     const tc = prevMsg.tool_calls.find((t: any) => t.function?.name === m.tool_name)
                     if (tc?.id) {
-                      msg.tool_call_id = tc.id
-                    } else {
-                      return null // Cannot reconstruct
+                      callId = tc.id
                     }
-                  } else {
-                    return null // No assistant message to reconstruct from
                   }
                 }
+                // Skip tool message if no valid tool_call_id
+                if (!callId || callId.length === 0) {
+                  return null
+                }
+                msg.tool_call_id = callId
               }
 
               if (m.tool_name) msg.name = m.tool_name
@@ -397,13 +757,29 @@ export class ChatRunSocket {
                     compressedStartIndex: result.meta.compressedStartIndex,
                   })
 
-                  history = result.messages.map(m => ({
-                    role: m.role,
-                    content: m.content,
-                    tool_calls: m.tool_calls,
-                    tool_call_id: m.tool_call_id,
-                    name: m.name,
-                  }))
+                  history = result.messages.map(m => {
+                    const msg: any = {
+                      role: m.role,
+                      content: m.content,
+                      tool_call_id: m.tool_call_id,
+                      name: m.name,
+                    }
+                    if (m.reasoning_content) msg.reasoning_content = m.reasoning_content
+                    // Filter tool_calls if present, remove internal fields
+                    if (m.tool_calls?.length) {
+                      const cleanedToolCalls = m.tool_calls
+                        .filter((tc: any) => tc.id && tc.id.length > 0)
+                        .map((tc: any) => ({
+                          id: tc.id,
+                          type: tc.type,
+                          function: tc.function
+                        }))
+                      if (cleanedToolCalls.length > 0) {
+                        msg.tool_calls = cleanedToolCalls
+                      }
+                    }
+                    return msg
+                  })
                   // Update usage from DB (snapshot now updated by compressor)
                   await this.calcAndUpdateUsage(session_id, cState, emit)
                 } catch (err: any) {
@@ -488,13 +864,29 @@ export class ChatRunSocket {
                     compressedStartIndex: result.meta.compressedStartIndex,
                   })
 
-                  history = result.messages.map(m => ({
-                    role: m.role,
-                    content: m.content,
-                    tool_calls: m.tool_calls,
-                    tool_call_id: m.tool_call_id,
-                    name: m.name,
-                  }))
+                  history = result.messages.map(m => {
+                    const msg: any = {
+                      role: m.role,
+                      content: m.content,
+                      tool_call_id: m.tool_call_id,
+                      name: m.name,
+                    }
+                    if (m.reasoning_content) msg.reasoning_content = m.reasoning_content
+                    // Filter tool_calls if present, remove internal fields
+                    if (m.tool_calls?.length) {
+                      const cleanedToolCalls = m.tool_calls
+                        .filter((tc: any) => tc.id && tc.id.length > 0)
+                        .map((tc: any) => ({
+                          id: tc.id,
+                          type: tc.type,
+                          function: tc.function
+                        }))
+                      if (cleanedToolCalls.length > 0) {
+                        msg.tool_calls = cleanedToolCalls
+                      }
+                    }
+                    return msg
+                  })
                   await this.calcAndUpdateUsage(session_id, cState, emit)
                 } catch (err: any) {
                   this.replaceState(session_id, 'compression.completed', {
@@ -535,6 +927,30 @@ export class ChatRunSocket {
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+
+      // Debug: write history to JSON file for analysis (before conversion)
+
+      // Convert conversation_history from OpenAI format to Anthropic format
+      if (body.conversation_history && Array.isArray(body.conversation_history)) {
+        const originalHistory = body.conversation_history
+        body.conversation_history = convertToAnthropicFormat(body.conversation_history)
+        // Debug: write converted history for comparison
+        try {
+          const debugDir = join(process.cwd(), 'packages', 'server', 'data', 'debug-history')
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+          const filename = `history-${session_id}-${timestamp}-anthropic.json`
+          const filepath = join(debugDir, filename)
+          await fs.writeFile(filepath, JSON.stringify({
+            session_id,
+            original: originalHistory,
+            converted: body.conversation_history
+          }, null, 2), 'utf-8')
+          logger.info('[chat-run-socket] debug history (anthropic) written to %s', filename)
+        } catch (err) {
+          logger.warn(err, '[chat-run-socket] failed to write anthropic debug history')
+        }
+      }
+
       const res = await fetch(`${upstream}/v1/runs`, {
         method: 'POST',
         headers,
