@@ -255,40 +255,40 @@ export class ChatRunSocket {
                       .replace(/False/g, 'false')
                       .replace(/None/g, 'null')
                   )
-                if (Array.isArray(parsedContent)) {
-                  const textBlocks: string[] = []
-                  const toolCalls: any[] = []
-                  let reasoningContent: string | null = null
+                  if (Array.isArray(parsedContent)) {
+                    const textBlocks: string[] = []
+                    const toolCalls: any[] = []
+                    let reasoningContent: string | null = null
 
-                  for (const block of parsedContent) {
-                    if (block.type === 'thinking') {
-                      reasoningContent = block.thinking
-                    } else if (block.type === 'text') {
-                      textBlocks.push(block.text)
-                    } else if (block.type === 'tool_use') {
-                      toolCalls.push({
-                        id: block.id,
-                        type: 'function',
-                        function: {
-                          name: block.name,
-                          arguments: JSON.stringify(block.input)
-                        }
-                      })
+                    for (const block of parsedContent) {
+                      if (block.type === 'thinking') {
+                        reasoningContent = block.thinking
+                      } else if (block.type === 'text') {
+                        textBlocks.push(block.text)
+                      } else if (block.type === 'tool_use') {
+                        toolCalls.push({
+                          id: block.id,
+                          type: 'function',
+                          function: {
+                            name: block.name,
+                            arguments: JSON.stringify(block.input)
+                          }
+                        })
+                      }
+                    }
+
+                    msg.content = textBlocks.join('') || ''
+                    if (toolCalls.length > 0) {
+                      msg.tool_calls = toolCalls
+                    }
+                    if (reasoningContent) {
+                      msg.reasoning = reasoningContent
                     }
                   }
-
-                  msg.content = textBlocks.join('') || ''
-                  if (toolCalls.length > 0) {
-                    msg.tool_calls = toolCalls
-                  }
-                  if (reasoningContent) {
-                    msg.reasoning = reasoningContent
-                  }
+                } catch (e) {
+                  // Parsing failed, keep original content
+                  msg.content = m.content
                 }
-              } catch (e) {
-                // Parsing failed, keep original content
-                msg.content = m.content
-              }
               }
             } else if (Array.isArray(m.content)) {
               const textBlocks: string[] = []
@@ -407,13 +407,15 @@ export class ChatRunSocket {
         if (contentToParse.trim().startsWith('[') && contentToParse.trim().endsWith(']')) {
           try {
             // Parse stringified Python-like array to JSON
-            const parsedContent = JSON.parse(
-              contentToParse
-                .replace(/'/g, '"')  // Python single quotes to JSON double quotes
-                .replace(/True/g, 'true')
-                .replace(/False/g, 'false')
-                .replace(/None/g, 'null')
-            )
+            // NOTE: This simple replace can fail on content with embedded quotes
+            let jsonStr = contentToParse
+              .replace(/'/g, '"')  // Python single quotes to JSON double quotes
+              .replace(/True/g, 'true')
+              .replace(/False/g, 'false')
+              .replace(/None/g, 'null')
+
+            logger.info('[chat-run-socket] resume message %s: parsing content, length=%d', m.id, jsonStr.length)
+            const parsedContent = JSON.parse(jsonStr)
             if (Array.isArray(parsedContent)) {
               const textBlocks: string[] = []
               const toolCalls: any[] = []
@@ -445,6 +447,7 @@ export class ChatRunSocket {
               }
             }
           } catch (e) {
+            logger.error('[chat-run-socket] resume message %s: failed to parse content, error=%s, content=%s', m.id, (e as Error).message, contentToParse.substring(0, 200))
             // Parsing failed, keep original content
             msg.content = m.content
           }
