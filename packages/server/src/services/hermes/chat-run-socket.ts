@@ -10,6 +10,8 @@
  */
 import type { Server, Socket } from 'socket.io'
 import { EventSource } from 'eventsource'
+import { promises as fs } from 'fs'
+import { join } from 'path'
 import { setRunSession } from '../../routes/hermes/proxy-handler'
 import { updateUsage } from '../../db/hermes/usage-store'
 import {
@@ -133,29 +135,39 @@ export class ChatRunSocket {
                   content: m.content || '',
                   timestamp: m.timestamp,
                 }
-                if (m.tool_calls?.length) msg.tool_calls = m.tool_calls
+                if (m.tool_calls?.length) {
+                  // Filter out tool_calls with empty/invalid id and remove internal fields
+                  const cleanedToolCalls = m.tool_calls
+                    .filter((tc: any) => tc.id && tc.id.length > 0)
+                    .map((tc: any) => ({
+                      id: tc.id,
+                      type: tc.type,
+                      function: tc.function
+                    }))
+                  if (cleanedToolCalls.length > 0) {
+                    msg.tool_calls = cleanedToolCalls
+                  }
+                }
 
                 // For tool messages, ensure tool_call_id exists
                 if (m.role === 'tool') {
-                  if (m.tool_call_id) {
-                    msg.tool_call_id = m.tool_call_id
-                  } else {
+                  let callId = m.tool_call_id
+                  if (!callId || callId.length === 0) {
                     // Try to reconstruct tool_call_id from previous assistant message
                     const prevMsg = arr[idx - 1]
                     if (prevMsg?.role === 'assistant' && prevMsg.tool_calls?.length) {
                       // Find matching tool_call by tool_name
                       const tc = prevMsg.tool_calls.find((t: any) => t.function?.name === m.tool_name)
                       if (tc?.id) {
-                        msg.tool_call_id = tc.id
-                      } else {
-                        // Cannot reconstruct - skip this tool message
-                        return null
+                        callId = tc.id
                       }
-                    } else {
-                      // No previous assistant message with tool_calls - skip
-                      return null
                     }
                   }
+                  // Skip tool message if no valid tool_call_id
+                  if (!callId || callId.length === 0) {
+                    return null
+                  }
+                  msg.tool_call_id = callId
                 }
 
                 if (m.tool_name) msg.tool_name = m.tool_name
@@ -301,31 +313,45 @@ export class ChatRunSocket {
               tool_calls?: any[]
               tool_call_id?: string
               name?: string
+              reasoning_content?: string | null
             }> = (lastUserMsgIndex >= 0
               ? validMessages.slice(0, validMessages.length - lastUserMsgIndex - 1)
               : validMessages
             ).map((m, idx, arr) => {
-              const msg: any = { role: m.role, content: m.content || '' }
-              if (m.tool_calls?.length) msg.tool_calls = m.tool_calls
+              const msg: any = { role: m.role, content: m.content || 'empty message' }
+              if (m.reasoning_content) msg.reasoning_content = m.reasoning_content
+              if (m.tool_calls?.length) {
+                // Filter out tool_calls with empty/invalid id and remove internal fields
+                const cleanedToolCalls = m.tool_calls
+                  .filter((tc: any) => tc.id && tc.id.length > 0)
+                  .map((tc: any) => ({
+                    id: tc.id,
+                    type: tc.type,
+                    function: tc.function
+                  }))
+                if (cleanedToolCalls.length > 0) {
+                  msg.tool_calls = cleanedToolCalls
+                }
+              }
 
               // For tool messages, ensure tool_call_id exists
               if (m.role === 'tool') {
-                if (m.tool_call_id) {
-                  msg.tool_call_id = m.tool_call_id
-                } else {
+                let callId = m.tool_call_id
+                if (!callId || callId.length === 0) {
                   // Try to reconstruct tool_call_id from previous assistant message
                   const prevMsg = arr[idx - 1]
                   if (prevMsg?.role === 'assistant' && prevMsg.tool_calls?.length) {
                     const tc = prevMsg.tool_calls.find((t: any) => t.function?.name === m.tool_name)
                     if (tc?.id) {
-                      msg.tool_call_id = tc.id
-                    } else {
-                      return null // Cannot reconstruct
+                      callId = tc.id
                     }
-                  } else {
-                    return null // No assistant message to reconstruct from
                   }
                 }
+                // Skip tool message if no valid tool_call_id
+                if (!callId || callId.length === 0) {
+                  return null
+                }
+                msg.tool_call_id = callId
               }
 
               if (m.tool_name) msg.name = m.tool_name
@@ -397,13 +423,29 @@ export class ChatRunSocket {
                     compressedStartIndex: result.meta.compressedStartIndex,
                   })
 
-                  history = result.messages.map(m => ({
-                    role: m.role,
-                    content: m.content,
-                    tool_calls: m.tool_calls,
-                    tool_call_id: m.tool_call_id,
-                    name: m.name,
-                  }))
+                  history = result.messages.map(m => {
+                    const msg: any = {
+                      role: m.role,
+                      content: m.content,
+                      tool_call_id: m.tool_call_id,
+                      name: m.name,
+                    }
+                    if (m.reasoning_content) msg.reasoning_content = m.reasoning_content
+                    // Filter tool_calls if present, remove internal fields
+                    if (m.tool_calls?.length) {
+                      const cleanedToolCalls = m.tool_calls
+                        .filter((tc: any) => tc.id && tc.id.length > 0)
+                        .map((tc: any) => ({
+                          id: tc.id,
+                          type: tc.type,
+                          function: tc.function
+                        }))
+                      if (cleanedToolCalls.length > 0) {
+                        msg.tool_calls = cleanedToolCalls
+                      }
+                    }
+                    return msg
+                  })
                   // Update usage from DB (snapshot now updated by compressor)
                   await this.calcAndUpdateUsage(session_id, cState, emit)
                 } catch (err: any) {
@@ -488,13 +530,29 @@ export class ChatRunSocket {
                     compressedStartIndex: result.meta.compressedStartIndex,
                   })
 
-                  history = result.messages.map(m => ({
-                    role: m.role,
-                    content: m.content,
-                    tool_calls: m.tool_calls,
-                    tool_call_id: m.tool_call_id,
-                    name: m.name,
-                  }))
+                  history = result.messages.map(m => {
+                    const msg: any = {
+                      role: m.role,
+                      content: m.content,
+                      tool_call_id: m.tool_call_id,
+                      name: m.name,
+                    }
+                    if (m.reasoning_content) msg.reasoning_content = m.reasoning_content
+                    // Filter tool_calls if present, remove internal fields
+                    if (m.tool_calls?.length) {
+                      const cleanedToolCalls = m.tool_calls
+                        .filter((tc: any) => tc.id && tc.id.length > 0)
+                        .map((tc: any) => ({
+                          id: tc.id,
+                          type: tc.type,
+                          function: tc.function
+                        }))
+                      if (cleanedToolCalls.length > 0) {
+                        msg.tool_calls = cleanedToolCalls
+                      }
+                    }
+                    return msg
+                  })
                   await this.calcAndUpdateUsage(session_id, cState, emit)
                 } catch (err: any) {
                   this.replaceState(session_id, 'compression.completed', {
@@ -535,6 +593,22 @@ export class ChatRunSocket {
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+
+      // Debug: write history to JSON file for analysis
+      try {
+        const debugDir = join(process.cwd(), 'packages', 'server', 'data', 'debug-history')
+        await fs.mkdir(debugDir, { recursive: true })
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+        const filename = `history-${session_id}-${timestamp}.json`
+        const filepath = join(debugDir, filename)
+        await fs.writeFile(filepath, JSON.stringify({ session_id, body }, null, 2), 'utf-8')
+        console.log('完整写入')
+        logger.info('[chat-run-socket] debug history written to %s', filename)
+      } catch (err) {
+        console.log(err)
+        logger.warn(err, '[chat-run-socket] failed to write debug history')
+      }
+
       const res = await fetch(`${upstream}/v1/runs`, {
         method: 'POST',
         headers,
