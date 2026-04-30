@@ -309,8 +309,8 @@ export class ChatRunSocket {
                 }
 
                 // Convert Anthropic format content to OpenAI format
-                // Check if content is a stringified array (Hermes Gateway behavior)
-                if (typeof m.content === 'string' && m.content.startsWith('[') && m.content.endsWith(']')) {
+                // Check if content is a stringified array (Hermes Gateway behavior) - only for assistant messages
+                if (m.role === 'assistant' && typeof m.content === 'string' && m.content.startsWith('[') && m.content.endsWith(']')) {
                   try {
                     // Parse stringified Python-like array to JSON
                     const parsedContent = JSON.parse(
@@ -351,8 +351,8 @@ export class ChatRunSocket {
                       }
                     }
                   } catch (e) {
-                    // If parsing fails, keep original content
-                    console.log('Failed to parse stringified content:', e)
+                    // Parsing failed, keep original content
+                    msg.content = m.content
                   }
                 } else if (Array.isArray(m.content)) {
                   const textBlocks: string[] = []
@@ -461,8 +461,8 @@ export class ChatRunSocket {
       const clientMessages = state.messages.map((m: any) => {
         const msg: any = { ...m }
 
-        // Check if content is a stringified array (Hermes Gateway behavior)
-        if (typeof m.content === 'string' && m.content.trim().startsWith('[') && m.content.trim().endsWith(']')) {
+        // Check if content is a stringified array (Hermes Gateway behavior) - only for assistant messages
+        if (m.role === 'assistant' && typeof m.content === 'string' && m.content.trim().startsWith('[') && m.content.trim().endsWith(']')) {
           try {
             // Parse stringified Python-like array to JSON
             const parsedContent = JSON.parse(
@@ -503,8 +503,8 @@ export class ChatRunSocket {
               }
             }
           } catch (e) {
-            // If parsing fails, keep original content
-            console.log('Failed to parse stringified content:', e)
+            // Parsing failed, keep original content
+            msg.content = m.content
           }
         } else if (Array.isArray(m.content)) {
           // If content is an array (Anthropic format), convert to OpenAI format
@@ -1005,6 +1005,12 @@ export class ChatRunSocket {
       source.onmessage = (event: MessageEvent) => {
         try {
           const parsed = JSON.parse(event.data as string)
+          // Debug: log all events from upstream
+          if (parsed.event?.includes('reasoning') || parsed.event?.includes('thinking')) {
+            logger.info('[chat-run-socket] upstream event: %s, data: %j', parsed.event, parsed)
+          } else {
+            logger.info('[chat-run-socket] upstream event: %s', parsed.event)
+          }
 
           // Track messages into sessionMap
           if (session_id) {
@@ -1072,6 +1078,8 @@ export class ChatRunSocket {
                   if (last?.role === 'assistant' && last.finish_reason == null) {
                     last.finish_reason = parsed.finish_reason || 'stop'
                   }
+                  // Debug: log run.completed to check if reasoning is included
+                  logger.info('[chat-run-socket] run.completed keys: %s', Object.keys(parsed))
                   // Finalize assistant message — if no content was streamed, use output
                   if (parsed.output && !runProducedAssistantText(msgs)) {
                     if (last?.role === 'assistant') {
@@ -1286,6 +1294,7 @@ export class ChatRunSocket {
       logger.info('[chat-run-socket] enqueued ephemeral session %s for deletion', hermesSessionId)
     } catch { /* best-effort */ }
   }
+
 
   /** Get or create session state in sessionMap */
   private getOrCreateSession(sessionId: string): SessionState {
