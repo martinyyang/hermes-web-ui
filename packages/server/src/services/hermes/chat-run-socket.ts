@@ -236,16 +236,25 @@ export class ChatRunSocket {
             }
             // Convert Anthropic format content to OpenAI format
             // Check if content is a stringified array (Hermes Gateway behavior) - only for assistant messages
-            if (m.role === 'assistant' && typeof m.content === 'string' && m.content.startsWith('[') && m.content.endsWith(']')) {
-              try {
-                // Parse stringified Python-like array to JSON
-                const parsedContent = JSON.parse(
-                  m.content
-                    .replace(/'/g, '"')  // Python single quotes to JSON double quotes
-                    .replace(/True/g, 'true')
-                    .replace(/False/g, 'false')
-                    .replace(/None/g, 'null')
-                )
+            if (m.role === 'assistant' && typeof m.content === 'string') {
+              // Handle double-serialized content: "[{'type': 'text', ...}]" -> "[{'type': 'text', ...}]"
+              let contentToParse = m.content
+              const trimmed = m.content.trim()
+              if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+                contentToParse = trimmed.slice(1, -1)
+                logger.info('[chat-run-socket] resume message %s: double-serialized, removed outer quotes', m.id)
+              }
+
+              if (contentToParse.startsWith('[') && contentToParse.endsWith(']')) {
+                try {
+                  // Parse stringified Python-like array to JSON
+                  const parsedContent = JSON.parse(
+                    contentToParse
+                      .replace(/'/g, '"')  // Python single quotes to JSON double quotes
+                      .replace(/True/g, 'true')
+                      .replace(/False/g, 'false')
+                      .replace(/None/g, 'null')
+                  )
                 if (Array.isArray(parsedContent)) {
                   const textBlocks: string[] = []
                   const toolCalls: any[] = []
@@ -279,6 +288,7 @@ export class ChatRunSocket {
               } catch (e) {
                 // Parsing failed, keep original content
                 msg.content = m.content
+              }
               }
             } else if (Array.isArray(m.content)) {
               const textBlocks: string[] = []
@@ -385,49 +395,59 @@ export class ChatRunSocket {
     const clientMessages = state.messages.map((m: any) => {
       const msg: any = { ...m }
       // Check if content is a stringified array (Hermes Gateway behavior) - only for assistant messages
-      if (m.role === 'assistant' && typeof m.content === 'string' && m.content.trim().startsWith('[') && m.content.trim().endsWith(']')) {
-        try {
-          // Parse stringified Python-like array to JSON
-          const parsedContent = JSON.parse(
-            m.content
-              .replace(/'/g, '"')  // Python single quotes to JSON double quotes
-              .replace(/True/g, 'true')
-              .replace(/False/g, 'false')
-              .replace(/None/g, 'null')
-          )
-          if (Array.isArray(parsedContent)) {
-            const textBlocks: string[] = []
-            const toolCalls: any[] = []
-            let reasoningContent: string | null = null
+      if (m.role === 'assistant' && typeof m.content === 'string') {
+        // Handle double-serialized content: "[{'type': 'text', ...}]"
+        let contentToParse = m.content
+        const trimmed = m.content.trim()
+        if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+          contentToParse = trimmed.slice(1, -1)
+          logger.info('[chat-run-socket] resume message %s: double-serialized, removed outer quotes', m.id)
+        }
 
-            for (const block of parsedContent) {
-              if (block.type === 'thinking') {
-                reasoningContent = block.thinking
-              } else if (block.type === 'text') {
-                textBlocks.push(block.text)
-              } else if (block.type === 'tool_use') {
-                toolCalls.push({
-                  id: block.id,
-                  type: 'function',
-                  function: {
-                    name: block.name,
-                    arguments: JSON.stringify(block.input)
-                  }
-                })
+        if (contentToParse.trim().startsWith('[') && contentToParse.trim().endsWith(']')) {
+          try {
+            // Parse stringified Python-like array to JSON
+            const parsedContent = JSON.parse(
+              contentToParse
+                .replace(/'/g, '"')  // Python single quotes to JSON double quotes
+                .replace(/True/g, 'true')
+                .replace(/False/g, 'false')
+                .replace(/None/g, 'null')
+            )
+            if (Array.isArray(parsedContent)) {
+              const textBlocks: string[] = []
+              const toolCalls: any[] = []
+              let reasoningContent: string | null = null
+
+              for (const block of parsedContent) {
+                if (block.type === 'thinking') {
+                  reasoningContent = block.thinking
+                } else if (block.type === 'text') {
+                  textBlocks.push(block.text)
+                } else if (block.type === 'tool_use') {
+                  toolCalls.push({
+                    id: block.id,
+                    type: 'function',
+                    function: {
+                      name: block.name,
+                      arguments: JSON.stringify(block.input)
+                    }
+                  })
+                }
+              }
+
+              msg.content = textBlocks.join('') || ''
+              if (toolCalls.length > 0) {
+                msg.tool_calls = toolCalls
+              }
+              if (reasoningContent) {
+                msg.reasoning = reasoningContent
               }
             }
-
-            msg.content = textBlocks.join('') || ''
-            if (toolCalls.length > 0) {
-              msg.tool_calls = toolCalls
-            }
-            if (reasoningContent) {
-              msg.reasoning = reasoningContent
-            }
+          } catch (e) {
+            // Parsing failed, keep original content
+            msg.content = m.content
           }
-        } catch (e) {
-          // Parsing failed, keep original content
-          msg.content = m.content
         }
       } else if (Array.isArray(m.content)) {
         // If content is an array (Anthropic format), convert to OpenAI format
