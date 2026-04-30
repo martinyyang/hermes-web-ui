@@ -423,7 +423,7 @@ export function updateSessionStats(id: string): void {
 export function getSessionDetailPaginated(
   id: string,
   offset = 0,
-  limit = 5,
+  limit = 500,
 ): PaginatedSessionDetailResult | null {
   if (!isSqliteAvailable()) {
     return null
