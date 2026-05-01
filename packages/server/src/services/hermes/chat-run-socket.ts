@@ -935,7 +935,7 @@ export class ChatRunSocket {
       // @ts-ignore - eventsource library types are too strict
       const source = new EventSource(eventsUrl.toString(), eventSourceInit)
 
-      source.onmessage = (event: MessageEvent) => {
+      source.onmessage = async (event: MessageEvent) => {
         try {
           const parsed = JSON.parse(event.data as string)
           // Debug: log all events from upstream
@@ -1101,40 +1101,48 @@ export class ChatRunSocket {
             }
           }
 
-          // Usage will be calculated after syncFromHermes completes (in markCompleted)
-
-          emit(parsed.event || 'message', parsed)
-
+          // For run completion events, wait for syncFromHermes to finish
+          // before emitting. This ensures messages are in DB when client
+          // receives run.completed and might refresh session state.
           if (parsed.event === 'run.completed' || parsed.event === 'run.failed') {
             source.close()
-            if (session_id) this.markCompleted(socket, session_id, { event: parsed.event, run_id: parsed.run_id })
+            if (session_id) await this.markCompleted(socket, session_id, { event: parsed.event, run_id: parsed.run_id })
+            // Emit AFTER sync completes so client can safely refresh
+            emit(parsed.event, parsed)
+          } else {
+            emit(parsed.event || 'message', parsed)
           }
         } catch { /* not JSON, skip */ }
       }
 
-      source.onerror = () => {
+      source.onerror = async () => {
         source.close()
         emit('run.failed', { event: 'run.failed', error: 'EventSource connection lost' })
-        if (session_id) this.markCompleted(socket, session_id, { event: 'run.failed' })
+        if (session_id) await this.markCompleted(socket, session_id, { event: 'run.failed' })
       }
     } catch (err: any) {
       emit('run.failed', { event: 'run.failed', error: err.message })
-      if (session_id) this.markCompleted(socket, session_id, { event: 'run.failed' })
+      if (session_id) await this.markCompleted(socket, session_id, { event: 'run.failed' })
     }
   }
 
   // --- Abort handler ---
 
-  private handleAbort(socket: Socket, sessionId: string) {
+  private async handleAbort(socket: Socket, sessionId: string) {
     const state = this.sessionMap.get(sessionId)
     if (state?.isWorking && state.abortController) {
       state.abortController.abort()
-      this.markCompleted(socket, sessionId, { event: 'run.failed', run_id: state.runId })
+      await this.markCompleted(socket, sessionId, { event: 'run.failed', run_id: state.runId })
     }
   }
 
-  /** Mark a session run as completed/failed so reconnecting clients get notified */
-  private markCompleted(socket: Socket, sessionId: string, _info: { event: string; run_id?: string }) {
+  /**
+   * Mark a session run as completed/failed.
+   * Waits for syncFromHermes to complete before returning, so that:
+   * 1. Messages are persisted to DB before 'run.completed' is emitted
+   * 2. If client re-fetches session during this window, messages are already there
+   */
+  private async markCompleted(socket: Socket, sessionId: string, _info: { event: string; run_id?: string }): Promise<void> {
     const state = this.sessionMap.get(sessionId)
     if (state) {
       state.isWorking = false
@@ -1143,12 +1151,13 @@ export class ChatRunSocket {
       state.events = []
 
       // Sync messages from Hermes ephemeral session to local DB
+      // AWAIT this to ensure DB is up-to-date before run.completed is processed
       if (useLocalSessionStore() && state.hermesSessionId) {
         const hermesId = state.hermesSessionId
         const prof = state.profile
         state.hermesSessionId = undefined
         state.profile = undefined
-        this.syncFromHermes(socket, sessionId, hermesId, prof)
+        await this.syncFromHermes(socket, sessionId, hermesId, prof)
       }
     }
   }
